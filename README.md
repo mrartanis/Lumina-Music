@@ -2,6 +2,8 @@
 
 A modern, high-fidelity web and mobile music player for Plex servers.
 
+Live example: https://mrartanis.github.io/Lumina-Music/
+
 ## Features
 - 🎵 Gapless-style playback navigation
 - 📄 Play Queue management (Drag & drop, Reorder, Remove)
