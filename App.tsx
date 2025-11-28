@@ -59,6 +59,7 @@ const App: React.FC = () => {
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isSmartShuffle, setIsSmartShuffle] = useState(false);
+  const [mediaSessionImage, setMediaSessionImage] = useState<string | null>(null);
   
   // Audio State
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -145,64 +146,83 @@ const App: React.FC = () => {
   }, [isPlaying]);
 
   // --- Media Session API Integration (Lock Screen Controls & Artwork) ---
+  
+  // 1. Fetch Artwork Blob
   useEffect(() => {
-    if (!('mediaSession' in navigator)) return;
+      const currentTrack = queue[currentIndex];
+      if (!currentTrack) {
+          setMediaSessionImage(null);
+          return;
+      }
 
-    const currentTrack = queue[currentIndex];
+      let active = true;
+      const fetchImage = async () => {
+          try {
+              const src = getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 512, 512);
+              const res = await fetch(src);
+              const blob = await res.blob();
+              if (active) {
+                  const objectUrl = URL.createObjectURL(blob);
+                  setMediaSessionImage(prev => {
+                      if (prev) URL.revokeObjectURL(prev);
+                      return objectUrl;
+                  });
+              }
+          } catch (e) {
+              console.error("Failed to fetch lockscreen image", e);
+              // Fallback to URL if fetch fails, though likely won't work if fetch failed due to network
+              if (active) {
+                 const src = getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 512, 512);
+                 setMediaSessionImage(src);
+              }
+          }
+      };
+      fetchImage();
+      return () => { active = false; };
+  }, [currentIndex, queue]);
 
-    if (currentTrack) {
-        // Update Metadata
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title: currentTrack.track.title,
-            artist: currentTrack.track.originalTitle || currentTrack.track.grandparentTitle,
-            album: currentTrack.track.parentTitle,
-            artwork: [
-                { src: getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 96, 96), sizes: '96x96', type: 'image/jpeg' },
-                { src: getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 128, 128), sizes: '128x128', type: 'image/jpeg' },
-                { src: getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 192, 192), sizes: '192x192', type: 'image/jpeg' },
-                { src: getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 256, 256), sizes: '256x256', type: 'image/jpeg' },
-                { src: getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 384, 384), sizes: '384x384', type: 'image/jpeg' },
-                { src: getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 512, 512), sizes: '512x512', type: 'image/jpeg' },
-            ]
-        });
-    } else {
-        navigator.mediaSession.metadata = null;
-    }
+  // 2. Update Metadata
+  useEffect(() => {
+      if (!('mediaSession' in navigator)) return;
+      const currentTrack = queue[currentIndex];
+      
+      if (currentTrack) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+              title: currentTrack.track.title,
+              artist: currentTrack.track.originalTitle || currentTrack.track.grandparentTitle,
+              album: currentTrack.track.parentTitle,
+              artwork: mediaSessionImage ? [
+                  { src: mediaSessionImage, sizes: '512x512', type: 'image/jpeg' }
+              ] : []
+          });
+      } else {
+           navigator.mediaSession.metadata = null;
+      }
+  }, [currentIndex, queue, mediaSessionImage]);
 
-    // Update Playback State
-    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+  // 3. Update Playback State
+  useEffect(() => {
+      if (!('mediaSession' in navigator)) return;
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+  }, [isPlaying]);
 
-    // Bind Action Handlers
-    navigator.mediaSession.setActionHandler('play', () => setIsPlaying(true));
-    navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false));
-    
-    // Previous Track
-    navigator.mediaSession.setActionHandler('previoustrack', () => {
-        onPrev();
-    });
+  // 4. Update Handlers
+  useEffect(() => {
+      if (!('mediaSession' in navigator)) return;
+      
+      const setHandler = (action: MediaSessionAction, handler: MediaSessionActionHandler) => {
+           try { navigator.mediaSession.setActionHandler(action, handler); } catch (e) {}
+      };
 
-    // Next Track
-    navigator.mediaSession.setActionHandler('nexttrack', () => {
-        onNext();
-    });
+      setHandler('play', () => setIsPlaying(true));
+      setHandler('pause', () => setIsPlaying(false));
+      setHandler('previoustrack', onPrev);
+      setHandler('nexttrack', onNext);
+      setHandler('seekto', (details) => {
+           if (details.seekTime !== undefined) handleSeek(details.seekTime);
+      });
 
-    // Seek
-    navigator.mediaSession.setActionHandler('seekto', (details) => {
-        if (details.seekTime !== undefined) {
-            handleSeek(details.seekTime);
-        }
-    });
-
-    return () => {
-        // Optional cleanup
-        navigator.mediaSession.setActionHandler('play', null);
-        navigator.mediaSession.setActionHandler('pause', null);
-        navigator.mediaSession.setActionHandler('previoustrack', null);
-        navigator.mediaSession.setActionHandler('nexttrack', null);
-        navigator.mediaSession.setActionHandler('seekto', null);
-    };
-
-  }, [currentIndex, queue, isPlaying, onNext, onPrev]);
+  }, [onNext, onPrev, isPlaying]);
 
   // Click outside to close search context menu
   useEffect(() => {
