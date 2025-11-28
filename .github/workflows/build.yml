@@ -31,6 +31,28 @@ jobs:
           name: web-build
           path: dist/
 
+  deploy-gh-pages:
+    name: Deploy to GitHub Pages
+    needs: web-build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' # Only deploy from main branch
+    permissions:
+      contents: write # Required to push to gh-pages branch
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Web Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: web-build
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+
   android-build:
     name: Build Android (APK)
     runs-on: ubuntu-latest
@@ -102,6 +124,7 @@ jobs:
       - name: Build iOS Archive (Unsigned)
         run: |
           cd ios/App
+          # Use -allowProvisioningUpdates is usually for manual builds, checking without for CI
           xcodebuild -workspace App.xcworkspace \
             -scheme App \
             -destination generic/platform=iOS \
@@ -116,8 +139,8 @@ jobs:
           mkdir Payload
           # Copy the .app bundle from the archive to Payload
           cp -r App.xcarchive/Products/Applications/App.app Payload/
-          # Zip it up to create the IPA
-          zip -r App.ipa Payload
+          # Zip it up to create the IPA, using -y to preserve symlinks (critical for frameworks)
+          zip -r -y App.ipa Payload
 
       - name: Upload iOS IPA
         uses: actions/upload-artifact@v4

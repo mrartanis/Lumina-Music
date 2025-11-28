@@ -65,6 +65,32 @@ const App: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
+  // Helper Functions needed for MediaSession
+  const handleSeek = (time: number) => {
+      if (audioRef.current) {
+          audioRef.current.currentTime = time;
+          setCurrentTime(time);
+      }
+  };
+
+  const onNext = useCallback(() => {
+    if (currentIndex < queue.length - 1) {
+      setCurrentIndex(c => c + 1);
+    } else {
+        setIsPlaying(false);
+    }
+  }, [currentIndex, queue.length]);
+
+  const onPrev = useCallback(() => {
+    if (currentIndex > 0) {
+      setCurrentIndex(c => c - 1);
+    } else {
+        handleSeek(0);
+    }
+  }, [currentIndex]);
+
+  const togglePlay = () => setIsPlaying(!isPlaying);
+
   // --- Audio Logic ---
   useEffect(() => {
     const audio = new Audio();
@@ -85,7 +111,7 @@ const App: React.FC = () => {
         audio.removeEventListener('ended', handleEnded);
         audioRef.current = null;
     };
-  }, [currentIndex, queue]); 
+  }, [onNext]); // Added onNext dependency
 
   // Handle Track Source Change
   useEffect(() => {
@@ -106,7 +132,7 @@ const App: React.FC = () => {
           audioRef.current.pause();
           audioRef.current.src = '';
       }
-  }, [currentIndex, queue]);
+  }, [currentIndex, queue]); // Removed isPlaying to avoid loop re-triggers
 
   // Handle Play/Pause Toggle
   useEffect(() => {
@@ -118,6 +144,66 @@ const App: React.FC = () => {
       }
   }, [isPlaying]);
 
+  // --- Media Session API Integration (Lock Screen Controls & Artwork) ---
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+
+    const currentTrack = queue[currentIndex];
+
+    if (currentTrack) {
+        // Update Metadata
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: currentTrack.track.title,
+            artist: currentTrack.track.originalTitle || currentTrack.track.grandparentTitle,
+            album: currentTrack.track.parentTitle,
+            artwork: [
+                { src: getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 96, 96), sizes: '96x96', type: 'image/jpeg' },
+                { src: getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 128, 128), sizes: '128x128', type: 'image/jpeg' },
+                { src: getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 192, 192), sizes: '192x192', type: 'image/jpeg' },
+                { src: getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 256, 256), sizes: '256x256', type: 'image/jpeg' },
+                { src: getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 384, 384), sizes: '384x384', type: 'image/jpeg' },
+                { src: getTranscodeUrl(currentTrack.serverUri, currentTrack.serverToken, currentTrack.track.thumb, 512, 512), sizes: '512x512', type: 'image/jpeg' },
+            ]
+        });
+    } else {
+        navigator.mediaSession.metadata = null;
+    }
+
+    // Update Playback State
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+
+    // Bind Action Handlers
+    navigator.mediaSession.setActionHandler('play', () => setIsPlaying(true));
+    navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false));
+    
+    // Previous Track
+    navigator.mediaSession.setActionHandler('previoustrack', () => {
+        onPrev();
+    });
+
+    // Next Track
+    navigator.mediaSession.setActionHandler('nexttrack', () => {
+        onNext();
+    });
+
+    // Seek
+    navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime !== undefined) {
+            handleSeek(details.seekTime);
+        }
+    });
+
+    return () => {
+        // Optional cleanup
+        navigator.mediaSession.setActionHandler('play', null);
+        navigator.mediaSession.setActionHandler('pause', null);
+        navigator.mediaSession.setActionHandler('previoustrack', null);
+        navigator.mediaSession.setActionHandler('nexttrack', null);
+        navigator.mediaSession.setActionHandler('seekto', null);
+    };
+
+  }, [currentIndex, queue, isPlaying, onNext, onPrev]);
+
   // Click outside to close search context menu
   useEffect(() => {
       const handleClick = () => {
@@ -126,13 +212,6 @@ const App: React.FC = () => {
       window.addEventListener('click', handleClick);
       return () => window.removeEventListener('click', handleClick);
   }, [searchContextMenu.visible]);
-
-  const handleSeek = (time: number) => {
-      if (audioRef.current) {
-          audioRef.current.currentTime = time;
-          setCurrentTime(time);
-      }
-  };
 
   // --- Auth Logic ---
   const startAuth = async () => {
@@ -398,24 +477,6 @@ const App: React.FC = () => {
   const handleShuffleAll = () => {
     loadRandomTracks(false);
   };
-
-  const onNext = () => {
-    if (currentIndex < queue.length - 1) {
-      setCurrentIndex(c => c + 1);
-    } else {
-        setIsPlaying(false);
-    }
-  };
-
-  const onPrev = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(c => c - 1);
-    } else {
-        handleSeek(0);
-    }
-  };
-
-  const togglePlay = () => setIsPlaying(!isPlaying);
 
   const removeFromQueue = (index: number) => {
     setQueue(prev => {
