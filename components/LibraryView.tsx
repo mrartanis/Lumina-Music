@@ -60,15 +60,10 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
   // Handle External Navigation Requests
   useEffect(() => {
     if (navRequest && section) {
-        // Simple logic: Push the requested item onto the stack
-        // Ideally we would reconstruct the full path (Root -> Artist -> Album) but Plex Hub results don't always give us the parent info easily.
-        // For 'Go to', jumping straight to the item view is usually sufficient.
-        
         if (navRequest.level === 'artist') {
              setNavStack([{ level: 'root' }, { level: 'artist', artist: navRequest.item as PlexArtist }]);
-             setViewMode('artists'); // Ensure underlying mode matches (cosmetic mostly)
+             setViewMode('artists'); 
         } else if (navRequest.level === 'album') {
-             // If we have parent info, we could try to push artist first, but for now direct jump:
              setNavStack([{ level: 'root' }, { level: 'album', album: navRequest.item as PlexAlbum }]);
              setViewMode('albums');
         }
@@ -88,9 +83,6 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
   }, [filter]);
 
   useEffect(() => {
-    // Reset stack and filtering when library changes (unless it was a navRequest)
-    // We check navRequest timestamp vs last update time or just rely on the fact that section changes usually mean user clicked sidebar
-    // But here we just reset on section key change.
     setNavStack([{ level: 'root' }]);
     setViewMode('artists');
     setFilter('');
@@ -98,14 +90,12 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
 
   useEffect(() => {
     if (!server || !section) return;
-    // Reset list on navigation or mode change
     setOffset(0);
     setItems([]);
     setHasMore(true);
     loadContent(true);
   }, [server, section, viewMode, currentNav]);
 
-  // Click outside to close context menu
   useEffect(() => {
       const handleClick = () => {
           if (contextMenu.visible) setContextMenu(prev => ({ ...prev, visible: false }));
@@ -123,9 +113,7 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
       const currentOffset = reset ? 0 : offset;
       const size = PAGE_SIZE;
 
-      // Handle Drill Down Logic
       if (currentNav.level === 'artist' && currentNav.artist) {
-        // Fetch Albums for Artist
         data = await getArtistAlbums(
             server!.uri, server!.accessToken, section!.key, currentNav.artist.ratingKey, 
             currentOffset, size
@@ -133,7 +121,6 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
       } else if (currentNav.level === 'album' && currentNav.album) {
         data = await getAlbumTracks(server!.uri, server!.accessToken, section!.key, currentNav.album.ratingKey);
       } else {
-        // Root Level
         if (viewMode === 'artists') {
           data = await getLibraryArtists(server!.uri, server!.accessToken, section!.key, currentOffset, size, filter);
         } else if (viewMode === 'albums') {
@@ -145,14 +132,12 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
 
       const newItems = data.MediaContainer.Metadata || [];
       
-      // Update items
-      if (reset || currentNav.level === 'album') { // Always replace for albums (no pagination)
+      if (reset || currentNav.level === 'album') {
           setItems(newItems);
       } else {
           setItems(prev => [...prev, ...newItems]);
       }
 
-      // Check if we have more
       if (newItems.length < size || currentNav.level === 'album') {
           setHasMore(false);
       } else {
@@ -168,7 +153,6 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
       const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-      // Load more when user is 300px from bottom
       if (scrollHeight - scrollTop - clientHeight < 300 && !loading && hasMore) {
           loadContent(false);
       }
@@ -191,11 +175,9 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
   const openContextMenu = (e: React.MouseEvent, item: any, type: 'artist' | 'album' | 'track') => {
       e.stopPropagation();
       e.preventDefault();
-      // Calculate position
       let x = e.clientX;
       let y = e.clientY;
       
-      // Adjust if close to edge (simple check)
       if (window.innerWidth - x < 200) x = window.innerWidth - 210;
       if (window.innerHeight - y < 200) y = window.innerHeight - 200;
 
@@ -236,10 +218,8 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
       }
   };
 
-  // --- Render Helpers ---
-
   const renderTabs = () => {
-    if (navStack.length > 1) return null; // Hide tabs when drilled down
+    if (navStack.length > 1) return null;
 
     return (
       <div className="flex gap-2 mb-4 px-4 overflow-x-auto custom-scrollbar pb-2">
@@ -288,7 +268,7 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
     if (currentNav.level === 'album') title = currentNav.album?.title;
 
     return (
-        <div className="sticky top-0 bg-black/90 backdrop-blur-xl z-20 border-b border-white/10 pb-2">
+        <div className="sticky top-0 bg-black/90 backdrop-blur-xl z-20 border-b border-white/10 pb-2 pt-safe-top">
             <div className="p-4 pb-2 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2 overflow-hidden">
                     {navStack.length > 1 && (
@@ -313,7 +293,6 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
             {renderBreadcrumbs()}
             {renderTabs()}
 
-            {/* Search Input */}
             <div className="px-4 pb-2">
                  <input 
                    type="text" 
@@ -326,8 +305,6 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
         </div>
     );
   };
-
-  // --- Grid/List Renderers ---
 
   const renderGridItem = (item: any, type: 'artist' | 'album') => {
     const thumb = getTranscodeUrl(server!.uri, server!.accessToken, item.thumb, 300, 300);
@@ -347,7 +324,6 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
            )}
            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
            
-           {/* Context Menu Button */}
            <button 
              onClick={(e) => openContextMenu(e, item, type)}
              className="absolute top-2 right-2 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 hover:bg-black/80 transition-all md:block hidden"
@@ -360,7 +336,6 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
                <h3 className="text-white font-medium text-sm truncate">{item.title}</h3>
                {type === 'album' && <p className="text-gray-500 text-xs truncate">{item.year}</p>}
            </div>
-           {/* Mobile Context Trigger (always visible in layout but maybe style differently) */}
            <button 
              onClick={(e) => openContextMenu(e, item, type)}
              className="md:hidden text-gray-500 p-1 -mt-1"
@@ -387,7 +362,6 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
       
       <div className="flex-1 min-w-0">
         <h3 className="text-white font-medium truncate text-sm">{track.title}</h3>
-        {/* Show artist name if we are in generic track list, otherwise hide it if inside album */}
         {(viewMode === 'tracks' && currentNav.level === 'root') && (
             <p className="text-gray-500 text-xs truncate">{track.grandparentTitle}</p>
         )}
@@ -405,8 +379,6 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
       </button>
     </div>
   );
-
-  // --- Main Render ---
 
   if (!server || !section) return null;
 
@@ -427,14 +399,12 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
            <div className="text-center text-gray-600 mt-20">No items found</div>
         ) : (
             <>
-                {/* 1. Artist Detail View (Shows Albums) */}
                 {currentNav.level === 'artist' && (
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
                         {items.map(item => renderGridItem(item, 'album'))}
                     </div>
                 )}
 
-                {/* 2. Album Detail View (Shows Tracks) */}
                 {currentNav.level === 'album' && (
                     <div className="flex flex-col">
                         <div className="flex gap-4 mb-6 items-end">
@@ -449,8 +419,7 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
                             </div>
                              <div className="ml-auto flex gap-2">
                                 <button 
-                                    onClick={() => handleContextMenuAction('playNext')} // Actually this should play album now. 
-                                    // For simplicity using PlayNext on album context menu or adding a Play button here
+                                    onClick={() => handleContextMenuAction('playNext')}
                                     className="p-3 bg-plex-500 rounded-full text-black hover:bg-plex-600 transition shadow-lg"
                                 >
                                     <Play size={24} fill="currentColor" />
@@ -463,7 +432,6 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
                     </div>
                 )}
 
-                {/* 3. Root View */}
                 {currentNav.level === 'root' && (
                     <>
                         {viewMode === 'artists' && (
@@ -484,7 +452,6 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
                     </>
                 )}
                 
-                {/* Bottom Loading Indicator */}
                 {loading && items.length > 0 && (
                     <div className="flex justify-center p-6">
                         <div className="w-6 h-6 border-2 border-white/20 border-t-plex-500 rounded-full animate-spin"></div>
@@ -494,7 +461,6 @@ const LibraryView: React.FC<LibraryViewProps> = ({ server, section, onPlayTrack,
         )}
       </div>
 
-      {/* Context Menu Overlay */}
       {contextMenu.visible && (
           <div 
             className="fixed z-50 bg-dark-800 border border-white/10 rounded-xl shadow-2xl overflow-hidden min-w-[180px] animate-in fade-in zoom-in-95 duration-100"

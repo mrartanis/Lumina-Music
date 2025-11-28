@@ -1,12 +1,26 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { createPin, checkPin, getResources, getLibraries, searchHub, getTranscodeUrl, getRandomTracks, getStreamUrl, getAlbumTracks, getArtistTracks } from './services/plexService';
-import { PLEX_TOKEN_STORAGE_KEY, getClientId, APP_NAME } from './constants';
+import { createPin, checkPin, getResources, getLibraries, searchHub, getRandomTracks, getStreamUrl, getAlbumTracks, getArtistTracks, getTranscodeUrl } from './services/plexService';
+import { PLEX_TOKEN_STORAGE_KEY } from './constants';
 import { PlexResource, PlexDirectory, PlexTrack, PlayQueueItem } from './types';
 import PlayerBar from './components/PlayerBar';
 import LibraryView, { LibraryNavRequest } from './components/LibraryView';
 import FullScreenPlayer from './components/FullScreenPlayer';
 import QueueView from './components/QueueView';
-import { LogOut, Server, ListMusic, Music, Search, Settings, Check, Copy, Disc, Image, ChevronDown, Play, Shuffle, List, MoreVertical, ListPlus, ListStart, CornerUpRight } from './components/Icons';
+import { Server, Music, Search, Settings, Check, Copy, Disc, Image, ChevronDown, List, MoreVertical, ListPlus, ListStart, CornerUpRight } from './components/Icons';
+
+// Simple polyfill for Promise.any if not available (older iOS/Android)
+const promiseAny = (promises: Promise<any>[]) => {
+  if ((Promise as any).any) return (Promise as any).any(promises);
+  return Promise.all(
+    promises.map(p => p.then(
+      val => Promise.reject(val),
+      err => Promise.resolve(err)
+    ))
+  ).then(
+    errors => Promise.reject(errors),
+    val => Promise.resolve(val)
+  );
+};
 
 const App: React.FC = () => {
   // Auth State
@@ -46,14 +60,13 @@ const App: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isSmartShuffle, setIsSmartShuffle] = useState(false);
   
-  // Audio State (Lifted from PlayerBar)
+  // Audio State
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
   // --- Audio Logic ---
   useEffect(() => {
-    // Initialize audio element
     const audio = new Audio();
     audioRef.current = audio;
 
@@ -142,7 +155,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Poll for PIN
   useEffect(() => {
     if (!pinId || authToken) return;
 
@@ -164,7 +176,6 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [pinId, authToken]);
 
-  // Logout
   const handleLogout = () => {
     localStorage.removeItem(PLEX_TOKEN_STORAGE_KEY);
     setAuthToken(null);
@@ -212,60 +223,75 @@ const App: React.FC = () => {
     setSelectedLibrary(null);
     setActiveTab('library');
 
-    const isSecureContext = window.location.protocol === 'https:';
+    // 1. Check for Cached Connection URI
+    const cacheKey = `lumina_last_uri_${resource.clientIdentifier}`;
+    const cachedUri = localStorage.getItem(cacheKey);
+
+    if (cachedUri) {
+      console.log("Attempting cached connection:", cachedUri);
+      try {
+        const data = await getLibraries(cachedUri, resource.accessToken);
+        finishConnection(resource, cachedUri, data);
+        return;
+      } catch (e) {
+        console.warn("Cached connection failed, falling back to discovery.");
+        localStorage.removeItem(cacheKey); // Clear bad cache
+      }
+    }
+
+    // 2. Race All HTTPS Connections (Parallel)
     const secureConnections = resource.connections.filter(c => c.protocol === 'https');
-    let candidates = [...resource.connections];
-    
-    if (isSecureContext) candidates = secureConnections;
-
-    candidates.sort((a, b) => {
-      if (a.local && !b.local) return -1;
-      if (!a.local && b.local) return 1;
-      return 0;
-    });
-
-    if (candidates.length === 0) {
-      setConnectionError(isSecureContext ? "No HTTPS connections available." : "No reachable connections found.");
+    if (secureConnections.length === 0) {
+      setConnectionError("No HTTPS connections available.");
       setIsFetchingLibs(false);
       setConnectingServerId(null);
       return;
     }
 
-    let lastError: Error | null = null;
-    
-    for (const conn of candidates) {
-      try {
-        const data = await getLibraries(conn.uri, resource.accessToken);
-        setSelectedServer({
-          uri: conn.uri,
-          accessToken: resource.accessToken,
-          name: resource.name
-        });
+    try {
+      // Create a promise for each connection attempt
+      const connectionPromises = secureConnections.map(async (conn) => {
+         const data = await getLibraries(conn.uri, resource.accessToken);
+         return { uri: conn.uri, data };
+      });
 
-        if (data.MediaContainer.Directory) {
-           setLibraries(data.MediaContainer.Directory);
-        } else {
-           setLibraries([]); 
-        }
-        setIsFetchingLibs(false);
-        setConnectingServerId(null);
-        return;
-      } catch (e) {
-        console.warn(`Connection failed to ${conn.uri}`, e);
-        lastError = e as Error;
-      }
+      // Wait for the first successful connection
+      // Use the polyfill-like logic or native Promise.any
+      const winner = await promiseAny(connectionPromises);
+      
+      // Save cache for next time
+      localStorage.setItem(cacheKey, winner.uri);
+      
+      finishConnection(resource, winner.uri, winner.data);
+
+    } catch (aggregateError) {
+      console.error("All connections failed", aggregateError);
+      setConnectionError(`Could not connect to ${resource.name}. Check your network settings.`);
+      setIsFetchingLibs(false);
+      setConnectingServerId(null);
     }
+  };
 
-    setConnectionError(`Could not connect to ${resource.name}. ${lastError ? lastError.message : ''}`);
-    setIsFetchingLibs(false);
-    setConnectingServerId(null);
+  const finishConnection = (resource: PlexResource, uri: string, data: PlexDirectory | any) => {
+      setSelectedServer({
+        uri: uri,
+        accessToken: resource.accessToken,
+        name: resource.name
+      });
+
+      if (data.MediaContainer.Directory) {
+         setLibraries(data.MediaContainer.Directory);
+      } else {
+         setLibraries([]); 
+      }
+      setIsFetchingLibs(false);
+      setConnectingServerId(null);
   };
 
   // --- Smart Shuffle Logic ---
   const loadRandomTracks = async (append: boolean = false) => {
     if (!selectedServer || !selectedLibrary) return;
     try {
-      // Fetch 10 random tracks
       const data = await getRandomTracks(selectedServer.uri, selectedServer.accessToken, selectedLibrary.key, 10);
       const newTracks = data.MediaContainer.Metadata || [];
       
@@ -289,11 +315,8 @@ const App: React.FC = () => {
     }
   };
 
-  // Watch Queue for Smart Shuffle
   useEffect(() => {
     if (!isSmartShuffle || queue.length === 0) return;
-    
-    // If we are near the end of the queue (3 items left), load more
     if (currentIndex >= queue.length - 3) {
       loadRandomTracks(true);
     }
@@ -329,17 +352,14 @@ const App: React.FC = () => {
     setQueue(prev => {
       const q = [...prev];
       if (queue.length === 0) {
-          // If queue empty, just play
           setCurrentIndex(0);
           setIsPlaying(true);
           return newItems;
       }
       
       if (playNext) {
-          // Add after current track
           q.splice(currentIndex + 1, 0, ...newItems);
       } else {
-          // Add to end
           q.push(...newItems);
       }
       return q;
@@ -356,7 +376,6 @@ const App: React.FC = () => {
       return newQ;
     });
 
-    // Adjust currentIndex
     if (currentIndex === fromIndex) {
       setCurrentIndex(toIndex);
     } else if (currentIndex > fromIndex && currentIndex <= toIndex) {
@@ -384,7 +403,6 @@ const App: React.FC = () => {
     if (currentIndex < queue.length - 1) {
       setCurrentIndex(c => c + 1);
     } else {
-        // End of queue
         setIsPlaying(false);
     }
   };
@@ -393,25 +411,21 @@ const App: React.FC = () => {
     if (currentIndex > 0) {
       setCurrentIndex(c => c - 1);
     } else {
-        // Seek to start if no prev
         handleSeek(0);
     }
   };
 
   const togglePlay = () => setIsPlaying(!isPlaying);
 
-  // Queue Management
   const removeFromQueue = (index: number) => {
     setQueue(prev => {
         const newQ = [...prev];
         newQ.splice(index, 1);
         return newQ;
     });
-    // Adjust index if we removed something before current
     if (index < currentIndex) {
         setCurrentIndex(c => c - 1);
     } else if (index === currentIndex) {
-        // If we removed current playing, either play next or stop if empty
         if (queue.length <= 1) {
             setIsPlaying(false);
             setCurrentIndex(-1);
@@ -452,12 +466,10 @@ const App: React.FC = () => {
   const openSearchContextMenu = (e: React.MouseEvent, item: any) => {
       e.stopPropagation();
       e.preventDefault();
-      // Position calculation
       let x = e.clientX;
       let y = e.clientY;
       if (window.innerWidth - x < 200) x = window.innerWidth - 210;
       if (window.innerHeight - y < 200) y = window.innerHeight - 200;
-      
       setSearchContextMenu({ visible: true, x, y, item });
   };
 
@@ -465,7 +477,6 @@ const App: React.FC = () => {
       if (item.type === 'track') {
           playTrack(item);
       } else {
-          // Go to item logic for containers
           handleSearchContextMenuAction('goTo', item);
       }
   };
@@ -476,11 +487,8 @@ const App: React.FC = () => {
       
       setSearchContextMenu(prev => ({ ...prev, visible: false }));
 
-      // --- Navigation Logic ---
       if (action === 'goTo') {
-          // Try to find the library this item belongs to
           const libId = targetItem.librarySectionID;
-          // Match by Key (ID) or fallback to UUID logic if needed
           const lib = libraries.find(l => l.key === String(libId));
           
           if (lib) {
@@ -491,17 +499,10 @@ const App: React.FC = () => {
                   timestamp: Date.now() 
               });
               setActiveTab('library');
-          } else {
-              // Fallback: If we can't find the specific library (maybe it wasn't loaded?), we can't navigate easily into LibraryView
-              // but we can try to stay on search or alert user. 
-              // For now, assume if search found it, the library exists. 
-              // If the library list isn't populated (rare if we are searching), it might fail.
-              console.warn("Could not find library for this item");
           }
           return;
       }
 
-      // --- Queue Logic ---
       try {
         let tracks: PlexTrack[] = [];
         if (targetItem.type === 'track') {
@@ -526,9 +527,8 @@ const App: React.FC = () => {
   // --- Render ---
 
   if (!authToken) {
-    // Auth UI (Keep existing)
     return (
-      <div className="min-h-screen bg-dark-900 flex flex-col items-center justify-center p-4">
+      <div className="min-h-screen bg-dark-900 flex flex-col items-center justify-center p-4 pt-safe-top">
         <div className="max-w-md w-full text-center space-y-8">
           <div>
             <div className="w-20 h-20 bg-plex-500 rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-plex-600/20 mb-6">
@@ -582,7 +582,7 @@ const App: React.FC = () => {
   const renderContent = () => {
     if (activeTab === 'settings') {
         return (
-            <div className="flex-1 flex flex-col bg-black p-4 md:p-8 animate-in fade-in duration-300">
+            <div className="flex-1 flex flex-col bg-black p-4 md:p-8 animate-in fade-in duration-300 pt-safe-top">
                 <h2 className="text-2xl font-bold text-white mb-6">Settings</h2>
                 <div className="bg-dark-800 rounded-xl overflow-hidden mb-6">
                     <div className="p-4 border-b border-white/5 flex items-center justify-between">
@@ -596,10 +596,9 @@ const App: React.FC = () => {
     }
 
     if (activeTab === 'search') {
-        // Search View
-        if (!selectedServer) return <div className="flex-1 flex flex-col items-center justify-center text-gray-500 p-8 text-center"><Search size={48} className="mb-4 opacity-20" /><p>Connect to a server to search.</p></div>;
+        if (!selectedServer) return <div className="flex-1 flex flex-col items-center justify-center text-gray-500 p-8 text-center pt-safe-top"><Search size={48} className="mb-4 opacity-20" /><p>Connect to a server to search.</p></div>;
         return (
-            <div className="flex-1 flex flex-col bg-black h-full relative">
+            <div className="flex-1 flex flex-col bg-black h-full relative pt-safe-top">
                 <div className="p-4 bg-dark-900 border-b border-white/10">
                     <form onSubmit={performSearch} className="relative">
                         <input 
@@ -645,7 +644,6 @@ const App: React.FC = () => {
                     ) : searchQuery && !isSearching ? <div className="text-center text-gray-500 mt-10">No results found</div> : <div className="text-center text-gray-600 mt-10">Type to search</div>}
                 </div>
 
-                {/* Search Context Menu */}
                 {searchContextMenu.visible && (
                     <div 
                         className="fixed z-50 bg-dark-800 border border-white/10 rounded-xl shadow-2xl overflow-hidden min-w-[180px] animate-in fade-in zoom-in-95 duration-100"
@@ -683,7 +681,7 @@ const App: React.FC = () => {
 
     if (!selectedServer) {
         return (
-          <div className="flex-1 flex flex-col items-center justify-center text-gray-500 p-6 text-center animate-in fade-in">
+          <div className="flex-1 flex flex-col items-center justify-center text-gray-500 p-6 text-center animate-in fade-in pt-safe-top">
             <Server size={48} className="mb-4 opacity-20" />
             <p className="text-lg font-medium text-white mb-2">Select a server</p>
             {connectionError && <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs text-left w-full max-w-sm break-words">{connectionError}</div>}
@@ -701,7 +699,7 @@ const App: React.FC = () => {
 
     if (!selectedLibrary) {
          return (
-           <div className="flex-1 flex flex-col p-4 md:hidden animate-in fade-in">
+           <div className="flex-1 flex flex-col p-4 md:hidden animate-in fade-in pt-safe-top">
               <div className="flex items-center justify-between mb-6">
                  <h2 className="text-xl font-bold text-white">{selectedServer.name}</h2>
               </div>
@@ -739,7 +737,7 @@ const App: React.FC = () => {
     <div className="h-[100dvh] bg-black flex flex-col md:flex-row overflow-hidden">
       
       {/* Sidebar (Desktop) */}
-      <div className="hidden md:flex flex-col w-64 bg-dark-900 border-r border-white/5 p-4 flex-shrink-0">
+      <div className="hidden md:flex flex-col w-64 bg-dark-900 border-r border-white/5 p-4 flex-shrink-0 pt-safe-top">
          <div className="flex items-center gap-2 mb-8 px-2">
             <div className="w-8 h-8 bg-plex-500 rounded-lg flex items-center justify-center"><Music size={16} className="text-black"/></div>
             <span className="font-bold text-xl text-white">Lumina</span>
@@ -800,11 +798,11 @@ const App: React.FC = () => {
       </div>
 
       {/* Mobile Nav */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 h-[60px] bg-dark-900 border-t border-white/5 flex items-center justify-around z-40 pb-safe shadow-lg">
-         <button onClick={() => setActiveTab('library')} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'library' ? 'text-plex-500' : 'text-gray-500'}`}><Server size={20} /><span className="text-[10px] font-medium">Library</span></button>
-         <button onClick={() => setActiveTab('search')} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'search' ? 'text-plex-500' : 'text-gray-500'}`}><Search size={20} /><span className="text-[10px] font-medium">Search</span></button>
-         <button onClick={() => setQueueOpen(true)} className={`flex flex-col items-center gap-1 w-full h-full justify-center text-gray-500`}><List size={20} /><span className="text-[10px] font-medium">Queue</span></button>
-         <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'settings' ? 'text-plex-500' : 'text-gray-500'}`}><Settings size={20} /><span className="text-[10px] font-medium">Settings</span></button>
+      <div className="md:hidden fixed bottom-0 left-0 right-0 h-[84px] bg-dark-900 border-t border-white/5 flex items-center justify-around z-40 pb-safe shadow-lg">
+         <button onClick={() => setActiveTab('library')} className={`flex flex-col items-center gap-1.5 w-full h-full pt-3 active:scale-90 transition-transform ${activeTab === 'library' ? 'text-plex-500' : 'text-gray-500'}`}><Server size={28} /><span className="text-xs font-medium">Library</span></button>
+         <button onClick={() => setActiveTab('search')} className={`flex flex-col items-center gap-1.5 w-full h-full pt-3 active:scale-90 transition-transform ${activeTab === 'search' ? 'text-plex-500' : 'text-gray-500'}`}><Search size={28} /><span className="text-xs font-medium">Search</span></button>
+         <button onClick={() => setQueueOpen(true)} className={`flex flex-col items-center gap-1.5 w-full h-full pt-3 active:scale-90 transition-transform text-gray-500`}><List size={28} /><span className="text-xs font-medium">Queue</span></button>
+         <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center gap-1.5 w-full h-full pt-3 active:scale-90 transition-transform ${activeTab === 'settings' ? 'text-plex-500' : 'text-gray-500'}`}><Settings size={28} /><span className="text-xs font-medium">Settings</span></button>
       </div>
 
       {/* Full Player */}

@@ -27,10 +27,8 @@ const QueueView: React.FC<QueueViewProps> = ({ queue, currentIndex, onClose, onP
   const handleDragStart = (e: React.DragEvent, index: number) => {
     setDraggedItemIndex(index);
     e.dataTransfer.effectAllowed = 'move';
-    // Firefox requires data to be set
     e.dataTransfer.setData('text/plain', index.toString());
     
-    // Add a class or style to the ghost image if needed
     const target = e.target as HTMLElement;
     target.style.opacity = '0.5';
   };
@@ -42,7 +40,7 @@ const QueueView: React.FC<QueueViewProps> = ({ queue, currentIndex, onClose, onP
   };
 
   const handleDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault(); // Necessary to allow dropping
+    e.preventDefault(); 
     e.dataTransfer.dropEffect = 'move';
   };
 
@@ -107,7 +105,6 @@ const QueueView: React.FC<QueueViewProps> = ({ queue, currentIndex, onClose, onP
                     ${draggedItemIndex === index ? 'opacity-50 border-2 border-dashed border-gray-500' : ''}
                 `}
               >
-                {/* Drag Handle / Reorder Controls */}
                 {editMode ? (
                     <div className="flex flex-col gap-1 mr-1">
                         <button 
@@ -161,7 +158,6 @@ const QueueView: React.FC<QueueViewProps> = ({ queue, currentIndex, onClose, onP
                   </p>
                 </div>
 
-                {/* Remove Button */}
                 <button 
                   onClick={(e) => { e.stopPropagation(); onRemoveIndex(index); }}
                   className={`p-2 text-gray-600 hover:text-red-500 transition-all ${editMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}

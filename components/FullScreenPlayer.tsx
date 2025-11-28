@@ -46,7 +46,6 @@ const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/95 z-[60] flex flex-col animate-in slide-in-from-bottom duration-300">
-      {/* Background blur effect */}
       <div 
         className="absolute inset-0 opacity-30 pointer-events-none blur-3xl scale-150 transition-opacity duration-1000"
         style={{ 
@@ -56,7 +55,6 @@ const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
         }} 
       />
       
-      {/* Header */}
       <div className="relative flex items-center justify-between p-6 mt-safe-top z-10">
         <button onClick={onClose} className="text-white/80 hover:text-white p-2">
           <ChevronDown size={32} />
@@ -67,7 +65,6 @@ const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
         </button>
       </div>
 
-      {/* Content */}
       <div className="relative flex-1 flex flex-col items-center justify-center p-8 z-10">
         <div className="w-full max-w-sm aspect-square mb-8 shadow-2xl rounded-2xl overflow-hidden bg-dark-800 border border-white/5">
            <img src={coverUrl} alt="Cover" className="w-full h-full object-cover" />
@@ -79,7 +76,6 @@ const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
             <h3 className="text-white/60 text-sm mt-1 truncate">{track.track.parentTitle}</h3>
         </div>
 
-        {/* Progress Bar */}
         <div className="w-full max-w-sm mb-8 group">
             <div 
                 className="h-2 bg-white/20 rounded-full cursor-pointer relative"
@@ -98,7 +94,6 @@ const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
             </div>
         </div>
 
-        {/* Controls */}
         <div className="w-full max-w-sm flex items-center justify-between">
            <button className="text-white/40 hover:text-white"><Shuffle size={24} /></button>
            <button onClick={onPrev} className="text-white hover:text-plex-500 transition-colors"><SkipBack size={40} /></button>

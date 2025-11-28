@@ -23,9 +23,12 @@
   -webkit-overflow-scrolling: touch;
 }
 
-/* Utilities */
+/* Utilities for Safe Areas */
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
+}
+.pt-safe-top {
+  padding-top: env(safe-area-inset-top);
 }
 .mt-safe-top {
   margin-top: env(safe-area-inset-top);
