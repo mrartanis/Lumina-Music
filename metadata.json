@@ -1,0 +1,5 @@
+{
+  "name": "Lumina Music for Plex",
+  "description": "A cross-platform, responsive web music player for Plex servers. Features OAuth login, local queue management, gapless-style playback navigation, and album art visualization.",
+  "requestFramePermissions": []
+}
