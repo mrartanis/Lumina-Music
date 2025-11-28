@@ -1,0 +1,13 @@
+{
+  "appId": "com.lumina.music",
+  "appName": "Lumina Music",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0
+    }
+  }
+}
